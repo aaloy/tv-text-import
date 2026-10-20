@@ -9,8 +9,6 @@
 
 use turbo_vision::app::{Application, ModalTick};
 use turbo_vision::core::command::{CM_OK, CM_USER, CommandId};
-use turbo_vision::core::geometry::Rect;
-use turbo_vision::core::state::State;
 use turbo_vision::views::checkbox::CheckBox;
 use turbo_vision::views::combo_box::ComboBox;
 use turbo_vision::views::dialog::Dialog;
@@ -19,7 +17,7 @@ use turbo_vision::views::handle::Handle;
 use turbo_vision::views::input_line::InputLine;
 use turbo_vision::views::spinner::Spinner;
 use turbo_vision::views::table::{Column, Table};
-use turbo_vision::views::{GroupLike, View, WindowLike};
+use turbo_vision::views::{GroupLike, View};
 
 use crate::charset::Charset;
 use crate::import::{Imported, detect_options, import};
@@ -110,7 +108,7 @@ impl TextImportDialog {
     /// Esc.
     pub fn execute(self, app: &mut Application) -> Option<Imported> {
         let (mut dialog, controls) = build_to_fit(&self.title, app.desktop.bounds().height());
-        prepare_modal(&mut dialog, app);
+        dialog.prepare_modal(app);
         let mut live = Live::new(&self.bytes, self.options);
         live.show(&mut dialog, &controls);
         let bytes = &self.bytes;
@@ -253,23 +251,6 @@ fn build(title: &str, preview_height: i16) -> (Dialog, Controls) {
         preview,
     };
     (dialog, controls)
-}
-
-/// What `Dialog::execute` does before its modal loop, which this dialog runs
-/// itself to refresh the preview between events (that preparation is private
-/// to turbo-vision). Without the modal state the dialog ignores OK and
-/// Cancel; without the rest it sits at the screen's top-left, over the menu
-/// bar, and can be dragged off the desktop.
-fn prepare_modal(dialog: &mut Dialog, app: &Application) {
-    dialog.set_state(dialog.state() | State::MODAL);
-    let desktop = app.desktop.bounds();
-    let b = dialog.bounds();
-    let left = desktop.a.x + (desktop.width() - b.width()).max(0) / 2;
-    let top = desktop.a.y + (desktop.height() - b.height()).max(0) / 2;
-    dialog.set_bounds(Rect::new(left, top, left + b.width(), top + b.height()));
-    let window = dialog.window_mut();
-    window.set_drag_limits(desktop);
-    window.constrain_to_limits();
 }
 
 /// The dialog with the tallest preview that lets it fit in `height` rows.

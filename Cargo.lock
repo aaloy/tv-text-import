@@ -915,7 +915,7 @@ dependencies = [
 [[package]]
 name = "turbo-vision"
 version = "4.0.2"
-source = "git+https://github.com/aaloy/turbo-vision-4-rust?branch=integration%2Fall#95ac675eda09be15cdc94cb31ee343248b0aed2f"
+source = "git+https://github.com/aaloy/turbo-vision-4-rust?branch=integration%2Fall#a0a350e559535d37d858ccac544c6a424809a192"
 dependencies = [
  "arboard",
  "chrono",
