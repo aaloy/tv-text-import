@@ -128,6 +128,38 @@ if let Some(mapping) = FieldMappingDialog::new("Map fields", &targets, &imported
   required one: OK is refused with a message until it has a column.
 - `Mapping::auto`, `missing` and `apply` work without the dialog.
 
+## Templates
+
+A template is the import settings and the field mapping of a kind of file
+(a bank's export, say) saved under a name, so you do not set them each time.
+
+```rust
+// After an import and a mapping the user was happy with:
+let template = Template::capture("Bank export", &imported, &targets, &mapping);
+template.save_in(&dir)?;                       // dir/Bank export.tvt
+
+// Later:
+let templates = Template::load_all(&dir);      // sorted by name; bad files skipped
+if let Some(choice) = choose_template(&mut app, "Import template", &templates) {
+    // choice: Some(&Template), or None for "set the options by hand"
+}
+let imported = template.import(&bytes);        // no dialog at all...
+let mapping = template.mapping(&targets, &imported);
+// ...or TextImportDialog::with_options(name, bytes, template.options.clone())
+// to let the user check it, and FieldMappingDialog::with_mapping(..., mapping).
+```
+
+- The options come back exactly, column types included.
+- A mapping is stored per field name, with the column's position in the file
+  and its title. In a file with titles the title is what matters, so the
+  columns may move, and a column that disappears leaves its field unmapped
+  (`Mapping::missing` flags it if required). A file without titles is matched
+  by position.
+- It is a text file of `key = value` lines (see `examples/templates/Bank.tvt`),
+  with no extra dependencies. Keys that are missing keep their defaults (separators are off unless listed) and
+  unknown ones are ignored, so templates survive new versions. A template
+  that cannot be read is a `TemplateError` naming the line.
+
 ## Example
 
 ```sh
@@ -137,6 +169,14 @@ cargo run --example text_import examples/data/bank_windows1252.csv
 It opens the dialog on the file. With no file given, press F3 to pick one.
 The result appears in its own window, with the file's titles as column
 headers when *First row has titles* is on and the column number otherwise.
+With a templates directory (`TV_TEXT_IMPORT_TEMPLATES`, default `./templates`;
+`examples/templates` has one) opening a file first asks which template to
+use, and after the import you can save the options and mapping as a new one:
+
+```sh
+TV_TEXT_IMPORT_TEMPLATES=examples/templates cargo run --example text_import examples/data/bank_windows1252.csv
+```
+
 File > Open and map (F4) follows the import with the mapping dialog, for a demo
 table of four fields. The Window menu tiles or cascades the windows, and also zooms, cycles and
 closes them. Each later import starts from the previous one's options.

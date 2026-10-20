@@ -1,0 +1,13 @@
+name = Bank export
+charset = windows-1252
+from_row = 1
+first_row_titles = true
+separator.semicolon = true
+quote = "
+decimal = ,
+thousands = .
+date_order = dmy
+column.1 = date-dmy
+map = 0	booked_on	Fecha
+map = 1	name	Concepto
+map = 2	amount	Importe

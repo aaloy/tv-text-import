@@ -10,6 +10,14 @@
 // column feeds each field of a demo table (id, name, amount, date). The next
 // import starts from the options of the last one, with the character set and
 // separator detected again. Alt-X quits.
+//
+// Templates: when the directory in $TV_TEXT_IMPORT_TEMPLATES (default
+// ./templates) holds any, opening a file first asks which to use, and after
+// each import you can save the options (and, from F4, the field mapping) as a
+// template. Try it with:
+//
+//   TV_TEXT_IMPORT_TEMPLATES=examples/templates cargo run --example text_import \
+//       examples/data/bank_windows1252.csv
 
 use std::path::{Path, PathBuf};
 
@@ -24,13 +32,14 @@ use turbo_vision::core::state::Grow;
 use turbo_vision::core::status_data::StatusItemBuilder;
 use turbo_vision::views::file_dialog::FileDialog;
 use turbo_vision::views::menu_bar::{MenuBar, SubMenu};
-use turbo_vision::views::msgbox::message_box_ok;
+use turbo_vision::views::msgbox::{input_box, message_box_ok};
 use turbo_vision::views::status_line::StatusLine;
 use turbo_vision::views::table::{Column, TableBuilder};
 use turbo_vision::views::window::WindowBuilder;
 use turbo_vision::views::{GroupLike, View};
 use tv_text_import::{
-    FieldMappingDialog, ImportOptions, Imported, TargetField, TextImportDialog, Value,
+    FieldMappingDialog, ImportOptions, Imported, Mapping, TargetField, Template, TextImportDialog,
+    Value, choose_template,
 };
 
 /// The widest a result column gets; longer values are cut in the table.
@@ -58,11 +67,36 @@ impl ImportApp {
             || path.display().to_string(),
             |n| n.to_string_lossy().into_owned(),
         );
-        let dialog = TextImportDialog::with_defaults(&name, bytes, &self.last);
+        let templates = Template::load_all(&templates_dir());
+        let template = if templates.is_empty() {
+            None
+        } else {
+            match choose_template(app, "Import template", &templates) {
+                Some(template) => template,
+                None => return,
+            }
+        };
+        let dialog = match template {
+            Some(t) => TextImportDialog::with_options(&name, bytes, t.options.clone()),
+            None => TextImportDialog::with_defaults(&name, bytes, &self.last),
+        };
         if let Some(imported) = dialog.execute(app) {
             self.last = imported.options.clone();
+            let targets = demo_targets();
+            let mut mapping = Mapping::none(&[]);
             if mapped {
-                show_mapped(app, &name, &imported);
+                let start = template.map_or_else(
+                    || Mapping::auto(&targets, &imported),
+                    |t| t.mapping(&targets, &imported),
+                );
+                let title = format!("Map fields - {name}");
+                let dialog = FieldMappingDialog::with_mapping(&title, &targets, &imported, start);
+                match dialog.execute(app) {
+                    Some(chosen) => mapping = chosen,
+                    None => return,
+                }
+                let titles: Vec<String> = targets.iter().map(|t| t.name.clone()).collect();
+                show(app, &name, &titles, &mapping.apply(&imported));
             } else {
                 let titles: Vec<String> = (0..imported.columns.len())
                     .map(|i| {
@@ -74,6 +108,8 @@ impl ImportApp {
                     .collect();
                 show(app, &name, &titles, &imported.rows);
             }
+            let targets = if mapped { &targets[..] } else { &[] };
+            offer_to_save(app, template, &imported, targets, &mapping);
         }
     }
 }
@@ -121,13 +157,44 @@ fn demo_targets() -> Vec<TargetField> {
     ]
 }
 
-/// Asks which column feeds each demo field and shows the rows in that order.
-fn show_mapped(app: &mut Application, name: &str, imported: &Imported) {
-    let targets = demo_targets();
-    let title = format!("Map fields - {name}");
-    if let Some(mapping) = FieldMappingDialog::new(&title, &targets, imported).execute(app) {
-        let titles: Vec<String> = targets.iter().map(|t| t.name.clone()).collect();
-        show(app, name, &titles, &mapping.apply(imported));
+/// Where the templates are kept: `$TV_TEXT_IMPORT_TEMPLATES`, else
+/// `./templates`.
+fn templates_dir() -> PathBuf {
+    std::env::var_os("TV_TEXT_IMPORT_TEMPLATES")
+        .map_or_else(|| PathBuf::from("templates"), PathBuf::from)
+}
+
+/// Offers to keep what was just chosen (the import options and, after
+/// File > Open and map, the field mapping) as a template. Esc or an empty
+/// name skips it; the name of the template used is offered again, to update it.
+fn offer_to_save(
+    app: &mut Application,
+    used: Option<&Template>,
+    imported: &Imported,
+    targets: &[TargetField],
+    mapping: &Mapping,
+) {
+    let initial = used.map_or("", |t| t.name.as_str());
+    let Some(name) = input_box(
+        app,
+        "Save as template",
+        "~N~ame (Esc: don't save)",
+        initial,
+        40,
+    ) else {
+        return;
+    };
+    let name = name.trim();
+    if name.is_empty() {
+        return;
+    }
+    let mut template = Template::capture(name, imported, targets, mapping);
+    if targets.is_empty() {
+        // Opened without mapping: keep the links of the template it came from.
+        template.links = used.map(|t| t.links.clone()).unwrap_or_default();
+    }
+    if let Err(error) = template.save_in(&templates_dir()) {
+        message_box_ok(app, &format!("Cannot save the template:\n{error}"));
     }
 }
 

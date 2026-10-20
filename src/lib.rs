@@ -26,6 +26,12 @@
 //! [`TargetField`]s, and [`Mapping::apply`] returns the rows in the table's
 //! order.
 //!
+//! A [`Template`] keeps the import options and the field mapping of a kind of
+//! file under a name, as a small text file, so the next file of that kind
+//! needs neither: [`choose_template`] asks which one, [`Template::import`]
+//! applies it without a dialog and [`Template::mapping`] resolves its links
+//! (by title, else by position) in the new file.
+//!
 //! Without the dialog, [`import()`] does the same work from options set in
 //! code, and [`detect_options`] guesses the character set and separator.
 //!
@@ -38,6 +44,8 @@ pub mod mapping;
 pub mod mapping_dialog;
 pub mod options;
 pub mod split;
+pub mod template;
+pub mod template_dialog;
 pub mod value;
 
 pub use charset::Charset;
@@ -46,4 +54,6 @@ pub use import::{Imported, ImportedColumn, detect_options, import};
 pub use mapping::{Mapping, TargetField};
 pub use mapping_dialog::FieldMappingDialog;
 pub use options::{ColumnType, DateOrder, ImportOptions, Separators};
+pub use template::{FieldLink, Template, TemplateError};
+pub use template_dialog::choose_template;
 pub use value::Value;

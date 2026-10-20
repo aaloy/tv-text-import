@@ -3,7 +3,8 @@
 
 use chrono::NaiveDate;
 use tv_text_import::{
-    Charset, ColumnType, DateOrder, ImportOptions, Separators, Value, detect_options, import,
+    Charset, ColumnType, DateOrder, ImportOptions, Separators, TargetField, Template, Value,
+    detect_options, import,
 };
 
 fn sample(name: &str) -> Vec<u8> {
@@ -148,4 +149,25 @@ fn space_aligned_columns_need_merged_delimiters() {
             date(2026, 10, 3),
         ]
     );
+}
+
+#[test]
+fn the_bank_template_imports_and_maps_the_bank_export() {
+    let path = format!("{}/examples/templates/Bank.tvt", env!("CARGO_MANIFEST_DIR"));
+    let template = Template::load(std::path::Path::new(&path)).unwrap();
+    let imported = template.import(&sample("bank_windows1252.csv"));
+
+    let targets = [
+        TargetField::new("amount").required(),
+        TargetField::new("booked_on"),
+        TargetField::new("memo"),
+    ];
+    let mapping = template.mapping(&targets, &imported);
+    assert_eq!(mapping.sources, vec![Some(2), Some(0), None]);
+    assert!(mapping.missing(&targets).is_empty());
+
+    let rows = mapping.apply(&imported);
+    assert_eq!(rows[0][1], date(2026, 10, 2));
+    assert_eq!(rows[0][2], Value::Empty);
+    assert_eq!(rows[0][0], Value::Number(-45.2));
 }

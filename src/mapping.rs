@@ -126,7 +126,7 @@ impl Mapping {
 }
 
 /// A name for comparing: lowercase letters and digits only.
-fn normal(name: &str) -> String {
+pub(crate) fn normal(name: &str) -> String {
     name.chars()
         .filter(|c| c.is_alphanumeric())
         .flat_map(char::to_lowercase)
