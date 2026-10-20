@@ -32,10 +32,14 @@ follows every change. On OK you get typed rows back.
 - **Character set**: UTF-8, UTF-16 LE/BE, Windows-1252 and ISO-8859-1. A
   byte-order mark wins; otherwise valid UTF-8 is read as UTF-8 and anything
   else as Windows-1252. No dependencies are added for this.
-- **From row** skips leading rows, such as a header or a bank's preamble.
+- **From row** skips leading rows, such as a bank's preamble.
+- **First row has titles** takes the first imported row as the column names
+  instead of data. Without it the columns are unnamed and an application
+  can number them.
 - **Separators**: tab, comma, semicolon and space, any other characters, and
   *merge delimiters* for space-aligned columns. On open, the separator is
-  guessed from the first 64 KiB.
+  guessed from the first 64 KiB. Space-aligned files are not guessed: tick
+  Space and Merge delimiters for them.
 - **String delimiter**: `"`, `'` or none. Quoted fields keep separators and
   line breaks, and a doubled quote is a literal one.
 - **Trim spaces** strips spaces around unquoted fields.
@@ -93,7 +97,8 @@ Without the dialog, `import(&bytes, &options)` does the same work, and
 
 `Imported` has three fields:
 
-- `columns`: each kept column's position in the file and its type.
+- `columns`: each kept column's position in the file, its type and its title
+  (`Some` only when *First row has titles* is on and the cell is not empty).
 - `rows`: one `Value` per kept column. Short rows are padded with
   `Value::Empty`.
 - `options`: what was used, so the next import can start from it.
@@ -105,8 +110,10 @@ cargo run --example text_import examples/data/bank_windows1252.csv
 ```
 
 It opens the dialog on the file. With no file given, press F3 to pick one.
-The result appears in a window with a column for each type. Each later
-import starts from the previous one's options.
+The result appears in its own window, with the file's titles as column
+headers when *First row has titles* is on and the column number otherwise.
+The Window menu tiles or cascades the windows, and also zooms, cycles and
+closes them. Each later import starts from the previous one's options.
 
 The `examples/data` samples cover the cases above:
 
@@ -116,7 +123,7 @@ The `examples/data` samples cover the cases above:
 | `us_sales.csv` | `,`, `1,234.50`, MDY, quoted commas, `""` and a line break in a field, accounting negatives |
 | `cities.tsv` | Tab, UTF-8 with BOM, zip codes kept as Text, YMD dates |
 | `budget_utf16.csv` | UTF-16 LE, `;`, a column to Hide |
-| `aligned.txt` | Space-aligned columns: Space + Merge delimiters |
+| `aligned.txt` | Space-aligned columns: Space + Merge delimiters, and a title row |
 
 ## Requirements
 
