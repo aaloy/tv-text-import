@@ -131,8 +131,11 @@ impl ColumnType {
 pub struct ImportOptions {
     /// The character set the bytes are decoded in.
     pub charset: Charset,
-    /// The first row imported, from 1. Earlier rows are skipped.
+    /// The first row imported, from 1. Earlier rows are skipped; with
+    /// `first_row_titles`, the title row is kept and this counts after it.
     pub from_row: usize,
+    /// The first imported row holds the column titles, not data.
+    pub first_row_titles: bool,
     /// Which characters end a field.
     pub separators: Separators,
     /// The character that quotes a field (separators and line breaks inside
@@ -160,6 +163,7 @@ impl Default for ImportOptions {
         Self {
             charset: Charset::Utf8,
             from_row: 1,
+            first_row_titles: false,
             separators: Separators::single(','),
             quote: Some('"'),
             trim: true,

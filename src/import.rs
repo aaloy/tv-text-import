@@ -6,8 +6,11 @@ use crate::split::{Field, guess_separator, split};
 use crate::value::{Value, convert};
 
 /// One imported column: where it came from and how it was typed.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ImportedColumn {
+    /// Its title, when the first row holds the titles and this one is not
+    /// empty.
+    pub title: Option<String>,
     /// Its position in the text, from 0, counting hidden columns.
     pub source: usize,
     /// The type its values were read with.
@@ -58,8 +61,14 @@ pub fn import(bytes: &[u8], options: &ImportOptions) -> Imported {
 #[must_use]
 pub fn type_rows(rows: &[Vec<Field>], options: &ImportOptions) -> Imported {
     let width = rows.iter().map(Vec::len).max().unwrap_or(0);
+    let titles = options.first_row_titles.then(|| rows.first()).flatten();
+    let rows = if titles.is_some() { &rows[1..] } else { rows };
     let columns: Vec<ImportedColumn> = (0..width)
         .map(|source| ImportedColumn {
+            title: titles
+                .and_then(|t| t.get(source))
+                .map(|f| f.text.clone())
+                .filter(|t| !t.is_empty()),
             source,
             column_type: options.column_type(source),
         })
@@ -107,6 +116,28 @@ mod tests {
             detect_options(b"one column\n", &base).separators,
             base.separators
         );
+    }
+
+    #[test]
+    fn first_row_titles_name_the_columns_and_leave_the_data() {
+        let mut o = detect_options(BANK, &ImportOptions::default());
+        o.decimal = ',';
+        o.thousands = Some('.');
+        let plain = import(BANK, &o);
+        assert!(plain.columns.iter().all(|c| c.title.is_none()));
+        o.first_row_titles = true;
+        let titled = import(BANK, &o);
+        let titles: Vec<_> = titled.columns.iter().map(|c| c.title.as_deref()).collect();
+        assert_eq!(
+            titles,
+            [
+                Some("Fecha"),
+                Some("Concepto"),
+                Some("Importe"),
+                Some("Saldo")
+            ]
+        );
+        assert_eq!(titled.rows.len(), plain.rows.len() - 1);
     }
 
     #[test]

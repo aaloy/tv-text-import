@@ -128,6 +128,7 @@ impl TextImportDialog {
 struct Controls {
     charset: Handle<ComboBox>,
     from_row: Handle<Spinner>,
+    first_row_titles: Handle<CheckBox>,
     tab: Handle<CheckBox>,
     comma: Handle<CheckBox>,
     semicolon: Handle<CheckBox>,
@@ -176,6 +177,7 @@ fn build(title: &str, preview_height: i16) -> (Dialog, Controls) {
         combo(26, FIRST_COMBO_ID, Charset::ALL.iter().map(|c| c.label())),
     );
     let from_row = line.field("~F~rom row", Spinner::new(size(9, 1), 1, 9_999_999));
+    let first_row_titles = line.field("", check_box("First row ha~s~ titles"));
     let mut line = form.line();
     let decimal = line.field(
         "Dec~i~mal",
@@ -234,6 +236,7 @@ fn build(title: &str, preview_height: i16) -> (Dialog, Controls) {
     let controls = Controls {
         charset,
         from_row,
+        first_row_titles,
         tab,
         comma,
         semicolon,
@@ -298,6 +301,7 @@ impl Live {
             s.set_value(i64::try_from(o.from_row).unwrap_or(1));
         }
         let checks = [
+            (c.first_row_titles, o.first_row_titles),
             (c.tab, o.separators.tab),
             (c.comma, o.separators.comma),
             (c.semicolon, o.separators.semicolon),
@@ -409,7 +413,12 @@ impl Live {
             .enumerate()
             .map(|(i, r)| {
                 let mut cells = Vec::with_capacity(width + 1);
-                cells.push((first + i).to_string());
+                let number = if self.options.first_row_titles && i == 0 {
+                    1
+                } else {
+                    first + i
+                };
+                cells.push(number.to_string());
                 cells.extend(
                     (0..width).map(|col| r.get(col).map(|f| shown(&f.text)).unwrap_or_default()),
                 );
@@ -440,6 +449,7 @@ fn read_options(dialog: &Dialog, c: &Controls, previous: &ImportOptions) -> Impo
             .and_then(|i| Charset::ALL.get(i).copied())
             .unwrap_or(previous.charset),
         from_row: usize::try_from(from_row).unwrap_or(1).max(1),
+        first_row_titles: checked(c.first_row_titles),
         separators: Separators {
             tab: checked(c.tab),
             comma: checked(c.comma),

@@ -25,6 +25,8 @@ impl Field {
 
 /// Splits `text` into rows of fields as `options` say, starting at
 /// [`ImportOptions::from_row`] and stopping after `limit` rows if given.
+/// When the first row holds titles, it is always kept and `from_row` counts
+/// the rows after it.
 ///
 /// Rows end at `\n`, `\r\n` or a lone `\r`, except inside a quoted field.
 /// A quote opens a field only at its start (after spaces, when trimming);
@@ -36,6 +38,9 @@ impl Field {
 pub fn split(text: &str, options: &ImportOptions, limit: Option<usize>) -> Vec<Vec<Field>> {
     let mut splitter = Splitter::new(options);
     let skip = options.from_row.saturating_sub(1);
+    let titles = usize::from(options.first_row_titles);
+    // Rows `titles + 1 ..= titles + skip` are skipped; the title row is not.
+    let kept = |seen: usize| seen <= titles || seen > titles + skip;
     let mut rows = Vec::new();
     let mut seen = 0usize;
     let mut chars = text.chars().peekable();
@@ -45,7 +50,7 @@ pub fn split(text: &str, options: &ImportOptions, limit: Option<usize>) -> Vec<V
                 chars.next();
             }
             seen += 1;
-            if seen > skip {
+            if kept(seen) {
                 rows.push(row);
                 if limit.is_some_and(|limit| rows.len() >= limit) {
                     return rows;
@@ -55,7 +60,7 @@ pub fn split(text: &str, options: &ImportOptions, limit: Option<usize>) -> Vec<V
     }
     if let Some(row) = splitter.finish() {
         seen += 1;
-        if seen > skip {
+        if kept(seen) {
             rows.push(row);
         }
     }
@@ -391,6 +396,19 @@ mod tests {
             ..opts(',')
         };
         assert!(split("1\n2", &past, None).is_empty());
+    }
+
+    #[test]
+    fn skipped_rows_count_after_the_titles() {
+        let o = ImportOptions {
+            from_row: 3,
+            first_row_titles: true,
+            ..opts(',')
+        };
+        assert_eq!(
+            texts(&split("t\n1\n2\n3\n4", &o, None)),
+            vec![vec!["t"], vec!["3"], vec!["4"]]
+        );
     }
 
     #[test]

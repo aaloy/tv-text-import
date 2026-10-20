@@ -5,14 +5,16 @@
 //
 // With FILE the dialog opens at once; otherwise, or for another file, use
 // File > Open (F3). Each result opens in its own window: numbers are right
-// aligned, dates are shown as YYYY-MM-DD, and the header says each column's
-// type. The next import starts from the options of the last one, with the
+// aligned and dates are shown as YYYY-MM-DD; the Window menu tiles or
+// cascades the result windows. The next import starts from the options of the last one, with the
 // character set and separator detected again. Alt-X quits.
 
 use std::path::{Path, PathBuf};
 
 use turbo_vision::app::{AppHandler, Application};
-use turbo_vision::core::command::{CM_OPEN, CM_QUIT, CommandId};
+use turbo_vision::core::command::{
+    CM_CASCADE, CM_CLOSE, CM_NEXT, CM_OPEN, CM_PREV, CM_QUIT, CM_TILE, CM_ZOOM, CommandId,
+};
 use turbo_vision::core::event::Event;
 use turbo_vision::core::geometry::Rect;
 use turbo_vision::core::menu_data::{Menu, MenuItem, MenuItemBuilder};
@@ -96,12 +98,12 @@ fn show(app: &mut Application, name: &str, imported: &Imported) {
         .iter()
         .map(|row| row.iter().map(cell).collect())
         .collect();
-    let columns = imported
-        .columns
-        .iter()
-        .enumerate()
-        .map(|(i, column)| {
-            let title = format!("{} {}", i + 1, column.column_type.label());
+    let columns = (0..imported.columns.len())
+        .map(|i| {
+            let title = imported.columns[i]
+                .title
+                .clone()
+                .unwrap_or_else(|| (i + 1).to_string());
             let widest = rows
                 .iter()
                 .filter_map(|r| r.get(i))
@@ -161,6 +163,40 @@ fn main() -> turbo_vision::core::error::Result<()> {
                 .text("E~x~it")
                 .command(CM_QUIT)
                 .key("Alt+X")
+                .build(),
+        ]),
+    ));
+    menu_bar.add_submenu(SubMenu::new(
+        "~W~indow",
+        Menu::from_items(vec![
+            MenuItemBuilder::new()
+                .text("~T~ile")
+                .command(CM_TILE)
+                .build(),
+            MenuItemBuilder::new()
+                .text("C~a~scade")
+                .command(CM_CASCADE)
+                .build(),
+            MenuItem::separator(),
+            MenuItemBuilder::new()
+                .text("~Z~oom")
+                .command(CM_ZOOM)
+                .key("F5")
+                .build(),
+            MenuItemBuilder::new()
+                .text("~N~ext")
+                .command(CM_NEXT)
+                .key("F6")
+                .build(),
+            MenuItemBuilder::new()
+                .text("~P~revious")
+                .command(CM_PREV)
+                .key("Shift+F6")
+                .build(),
+            MenuItemBuilder::new()
+                .text("~C~lose")
+                .command(CM_CLOSE)
+                .key("Alt+F3")
                 .build(),
         ]),
     ));
