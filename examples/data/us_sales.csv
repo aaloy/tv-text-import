@@ -1,0 +1,7 @@
+Date,Customer,Product,Quantity,Amount
+10/02/2026,"Smith, John",Widget,3,"1,234.50"
+10/05/2026,Acme Corp,"Gadget ""Pro""",12,980.00
+10/09/2026,"Jones & Co","Cable
+(2 m)",1,(15.99)
+10/15/2026,Bright Ltd,Widget,-2,-45.10
+10/31/2026,"  Padded  ",Service,,"12,000.00"

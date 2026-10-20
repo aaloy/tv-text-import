@@ -1,0 +1,19 @@
+[package]
+name = "tv-text-import"
+version = "0.1.0"
+edition = "2024"
+authors = ["Antoni Aloy"]
+description = "A Text Import dialog for turbo-vision, after LibreOffice Calc's: character set, separators, quotes, number and date formats, and a typed column preview"
+license = "MIT"
+keywords = ["tui", "turbo-vision", "csv", "import"]
+categories = ["command-line-interface", "parser-implementations"]
+
+[dependencies]
+# The fork's integration branch: frozen table panes, GroupBox, Form and
+# Unicode text input are not on crates.io yet. Switch to a crates.io
+# version once they are released.
+turbo-vision = { git = "https://github.com/aaloy/turbo-vision-4-rust", branch = "integration/all" }
+chrono = { version = "0.4.45", default-features = false, features = ["std"] }
+
+[dev-dependencies]
+turbo-vision = { git = "https://github.com/aaloy/turbo-vision-4-rust", branch = "integration/all", features = ["test-util"] }

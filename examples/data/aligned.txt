@@ -1,0 +1,5 @@
+id    name        score   date
+1     alpha       12.5    2026-10-01
+2     beta        7       2026-10-02
+3     gamma       100.25  2026-10-03
+4     delta       -3      2026-10-04
