@@ -103,6 +103,31 @@ Without the dialog, `import(&bytes, &options)` does the same work, and
   `Value::Empty`.
 - `options`: what was used, so the next import can start from it.
 
+## Mapping columns to database fields
+
+Importing into a table needs a second step: which column feeds which field.
+The application describes its fields, with no database dependency, and
+`FieldMappingDialog` shows one line per field with a combo box of the imported
+columns (title or number, and the first value as a sample):
+
+```rust
+let targets = [
+    TargetField::new("id").required(),
+    TargetField::new("amount").label("Amount"),
+];
+if let Some(mapping) = FieldMappingDialog::new("Map fields", &targets, &imported).execute(&mut app) {
+    let rows = mapping.apply(&imported); // one Value per field, in `targets` order
+}
+```
+
+- Columns are matched to fields on open: by title against the field's name
+  and label (ignoring case and punctuation), or by position when the file has
+  no titles. Pass `with_mapping` the mapping of an earlier import to start
+  from that instead.
+- A field can be left on "(none)" and then gets `Value::Empty`, except a
+  required one: OK is refused with a message until it has a column.
+- `Mapping::auto`, `missing` and `apply` work without the dialog.
+
 ## Example
 
 ```sh
@@ -112,7 +137,8 @@ cargo run --example text_import examples/data/bank_windows1252.csv
 It opens the dialog on the file. With no file given, press F3 to pick one.
 The result appears in its own window, with the file's titles as column
 headers when *First row has titles* is on and the column number otherwise.
-The Window menu tiles or cascades the windows, and also zooms, cycles and
+File > Open and map (F4) follows the import with the mapping dialog, for a demo
+table of four fields. The Window menu tiles or cascades the windows, and also zooms, cycles and
 closes them. Each later import starts from the previous one's options.
 
 The `examples/data` samples cover the cases above:

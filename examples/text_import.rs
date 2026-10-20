@@ -6,14 +6,16 @@
 // With FILE the dialog opens at once; otherwise, or for another file, use
 // File > Open (F3). Each result opens in its own window: numbers are right
 // aligned and dates are shown as YYYY-MM-DD; the Window menu tiles or
-// cascades the result windows. The next import starts from the options of the last one, with the
-// character set and separator detected again. Alt-X quits.
+// cascades the result windows. File > Open and map (F4) then asks which
+// column feeds each field of a demo table (id, name, amount, date). The next
+// import starts from the options of the last one, with the character set and
+// separator detected again. Alt-X quits.
 
 use std::path::{Path, PathBuf};
 
 use turbo_vision::app::{AppHandler, Application};
 use turbo_vision::core::command::{
-    CM_CASCADE, CM_CLOSE, CM_NEXT, CM_OPEN, CM_PREV, CM_QUIT, CM_TILE, CM_ZOOM, CommandId,
+    CM_CASCADE, CM_CLOSE, CM_NEXT, CM_OPEN, CM_PREV, CM_QUIT, CM_TILE, CM_USER, CM_ZOOM, CommandId,
 };
 use turbo_vision::core::event::Event;
 use turbo_vision::core::geometry::Rect;
@@ -27,10 +29,15 @@ use turbo_vision::views::status_line::StatusLine;
 use turbo_vision::views::table::{Column, TableBuilder};
 use turbo_vision::views::window::WindowBuilder;
 use turbo_vision::views::{GroupLike, View};
-use tv_text_import::{ImportOptions, Imported, TextImportDialog, Value};
+use tv_text_import::{
+    FieldMappingDialog, ImportOptions, Imported, TargetField, TextImportDialog, Value,
+};
 
 /// The widest a result column gets; longer values are cut in the table.
 const MAX_COLUMN_WIDTH: usize = 30;
+
+/// Open a file, then map its columns to the demo table's fields.
+const CM_OPEN_MAPPED: CommandId = CM_USER + 1;
 
 /// Remembers the options of the last import to start the next one from.
 struct ImportApp {
@@ -39,7 +46,7 @@ struct ImportApp {
 
 impl ImportApp {
     /// Reads `path`, runs the dialog on it and, on OK, shows the result.
-    fn open(&mut self, app: &mut Application, path: &Path) {
+    fn open(&mut self, app: &mut Application, path: &Path, mapped: bool) {
         let bytes = match std::fs::read(path) {
             Ok(bytes) => bytes,
             Err(error) => {
@@ -54,18 +61,30 @@ impl ImportApp {
         let dialog = TextImportDialog::with_defaults(&name, bytes, &self.last);
         if let Some(imported) = dialog.execute(app) {
             self.last = imported.options.clone();
-            show(app, &name, &imported);
+            if mapped {
+                show_mapped(app, &name, &imported);
+            } else {
+                let titles: Vec<String> = (0..imported.columns.len())
+                    .map(|i| {
+                        imported.columns[i]
+                            .title
+                            .clone()
+                            .unwrap_or_else(|| (i + 1).to_string())
+                    })
+                    .collect();
+                show(app, &name, &titles, &imported.rows);
+            }
         }
     }
 }
 
 impl AppHandler for ImportApp {
     fn handle_command(&mut self, app: &mut Application, command: CommandId, _: &Event) -> bool {
-        if command != CM_OPEN {
+        if command != CM_OPEN && command != CM_OPEN_MAPPED {
             return false;
         }
         if let Some(path) = pick_file(app) {
-            self.open(app, &path);
+            self.open(app, &path, command == CM_OPEN_MAPPED);
         }
         true
     }
@@ -91,20 +110,38 @@ fn cell(value: &Value) -> String {
         .replace(['\r', '\n'], "↵")
 }
 
-/// Opens a window with the imported rows in a table.
-fn show(app: &mut Application, name: &str, imported: &Imported) {
-    let rows: Vec<Vec<String>> = imported
-        .rows
+/// The fields of the demo table the columns are mapped to, in place of a
+/// real database table.
+fn demo_targets() -> Vec<TargetField> {
+    vec![
+        TargetField::new("id").required(),
+        TargetField::new("name").label("Name"),
+        TargetField::new("amount").label("Amount"),
+        TargetField::new("booked_on").label("Date"),
+    ]
+}
+
+/// Asks which column feeds each demo field and shows the rows in that order.
+fn show_mapped(app: &mut Application, name: &str, imported: &Imported) {
+    let targets = demo_targets();
+    let title = format!("Map fields - {name}");
+    if let Some(mapping) = FieldMappingDialog::new(&title, &targets, imported).execute(app) {
+        let titles: Vec<String> = targets.iter().map(|t| t.name.clone()).collect();
+        show(app, name, &titles, &mapping.apply(imported));
+    }
+}
+
+/// Opens a window with `rows` in a table under `titles`.
+fn show(app: &mut Application, name: &str, titles: &[String], rows: &[Vec<Value>]) {
+    let texts: Vec<Vec<String>> = rows
         .iter()
         .map(|row| row.iter().map(cell).collect())
         .collect();
-    let columns = (0..imported.columns.len())
-        .map(|i| {
-            let title = imported.columns[i]
-                .title
-                .clone()
-                .unwrap_or_else(|| (i + 1).to_string());
-            let widest = rows
+    let columns = titles
+        .iter()
+        .enumerate()
+        .map(|(i, title)| {
+            let widest = texts
                 .iter()
                 .filter_map(|r| r.get(i))
                 .map(|v| v.chars().count())
@@ -113,30 +150,25 @@ fn show(app: &mut Application, name: &str, imported: &Imported) {
                 .max(title.chars().count())
                 .clamp(3, MAX_COLUMN_WIDTH);
             let width = u16::try_from(widest).unwrap_or(u16::MAX);
-            let numeric = imported
-                .rows
+            let numeric = rows
                 .iter()
                 .any(|r| matches!(r.get(i), Some(Value::Number(_))));
             if numeric {
-                Column::right(&title, width)
+                Column::right(title, width)
             } else {
-                Column::new(&title, width)
+                Column::new(title, width)
             }
         })
         .collect();
 
     let desktop = app.desktop.bounds();
     let bounds = Rect::new(1, 0, desktop.width() - 1, desktop.height() - 1);
-    let title = format!(
-        "{name}: {} rows, {} columns",
-        imported.rows.len(),
-        imported.columns.len()
-    );
+    let title = format!("{name}: {} rows, {} columns", rows.len(), titles.len());
     let mut window = WindowBuilder::new().bounds(bounds).title(&title).build();
     let mut table = TableBuilder::new()
         .bounds(Rect::new(0, 0, bounds.width() - 2, bounds.height() - 2))
         .columns(columns)
-        .rows(rows)
+        .rows(texts)
         .separators(true)
         .build();
     table.set_grow_mode(Grow::HI_X | Grow::HI_Y);
@@ -157,6 +189,11 @@ fn main() -> turbo_vision::core::error::Result<()> {
                 .text("~O~pen...")
                 .command(CM_OPEN)
                 .key("F3")
+                .build(),
+            MenuItemBuilder::new()
+                .text("Open and ~m~ap...")
+                .command(CM_OPEN_MAPPED)
+                .key("F4")
                 .build(),
             MenuItem::separator(),
             MenuItemBuilder::new()
@@ -210,6 +247,11 @@ fn main() -> turbo_vision::core::error::Result<()> {
                 .command(CM_OPEN)
                 .build(),
             StatusItemBuilder::new()
+                .text("~F4~ Open and map")
+                .key("F4")
+                .command(CM_OPEN_MAPPED)
+                .build(),
+            StatusItemBuilder::new()
                 .text("~Alt-X~ Exit")
                 .key("Alt+X")
                 .command(CM_QUIT)
@@ -221,7 +263,7 @@ fn main() -> turbo_vision::core::error::Result<()> {
         last: ImportOptions::default(),
     };
     if let Some(path) = std::env::args_os().nth(1) {
-        handler.open(&mut app, Path::new(&path));
+        handler.open(&mut app, Path::new(&path), false);
     }
     app.run_with(&mut handler);
     Ok(())

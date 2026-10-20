@@ -21,6 +21,11 @@
 //! # }
 //! ```
 //!
+//! To load the rows into a database table, [`FieldMappingDialog`] then asks
+//! which imported column feeds each of the fields in a list of
+//! [`TargetField`]s, and [`Mapping::apply`] returns the rows in the table's
+//! order.
+//!
 //! Without the dialog, [`import()`] does the same work from options set in
 //! code, and [`detect_options`] guesses the character set and separator.
 //!
@@ -29,6 +34,8 @@
 pub mod charset;
 pub mod dialog;
 pub mod import;
+pub mod mapping;
+pub mod mapping_dialog;
 pub mod options;
 pub mod split;
 pub mod value;
@@ -36,5 +43,7 @@ pub mod value;
 pub use charset::Charset;
 pub use dialog::TextImportDialog;
 pub use import::{Imported, ImportedColumn, detect_options, import};
+pub use mapping::{Mapping, TargetField};
+pub use mapping_dialog::FieldMappingDialog;
 pub use options::{ColumnType, DateOrder, ImportOptions, Separators};
 pub use value::Value;
