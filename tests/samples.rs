@@ -160,7 +160,7 @@ fn the_bank_template_imports_and_maps_the_bank_export() {
     let targets = [
         TargetField::new("amount").required(),
         TargetField::new("booked_on"),
-        TargetField::new("memo"),
+        TargetField::new("category"),
     ];
     let mapping = template.mapping(&targets, &imported);
     assert_eq!(mapping.sources, vec![Some(2), Some(0), None]);

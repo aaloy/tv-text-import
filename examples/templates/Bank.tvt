@@ -9,5 +9,5 @@ thousands = .
 date_order = dmy
 column.1 = date-dmy
 map = 0	booked_on	Fecha
-map = 1	name	Concepto
+map = 1	memo	Concepto
 map = 2	amount	Importe

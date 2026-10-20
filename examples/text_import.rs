@@ -7,7 +7,7 @@
 // File > Open (F3). Each result opens in its own window: numbers are right
 // aligned and dates are shown as YYYY-MM-DD; the Window menu tiles or
 // cascades the result windows. File > Open and map (F4) then asks which
-// column feeds each field of a demo table (id, name, amount, date). The next
+// column feeds each field of a demo table (date, description, amount). The next
 // import starts from the options of the last one, with the character set and
 // separator detected again. Alt-X quits.
 //
@@ -150,10 +150,9 @@ fn cell(value: &Value) -> String {
 /// real database table.
 fn demo_targets() -> Vec<TargetField> {
     vec![
-        TargetField::new("id").required(),
-        TargetField::new("name").label("Name"),
-        TargetField::new("amount").label("Amount"),
         TargetField::new("booked_on").label("Date"),
+        TargetField::new("memo").label("Description"),
+        TargetField::new("amount").label("Amount"),
     ]
 }
 

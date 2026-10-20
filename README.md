@@ -178,7 +178,7 @@ TV_TEXT_IMPORT_TEMPLATES=examples/templates cargo run --example text_import exam
 ```
 
 File > Open and map (F4) follows the import with the mapping dialog, for a demo
-table of four fields. The Window menu tiles or cascades the windows, and also zooms, cycles and
+table of three fields (date, description, amount), which suits the bank sample. The Window menu tiles or cascades the windows, and also zooms, cycles and
 closes them. Each later import starts from the previous one's options.
 
 The `examples/data` samples cover the cases above:
