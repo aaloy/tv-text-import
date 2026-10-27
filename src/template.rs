@@ -12,6 +12,7 @@
 //! decimal = ,
 //! column.3 = hide
 //! map = 2<TAB>amount<TAB>Importe
+//! transform = gender<TAB>map<TAB>H<TAB>Hombre<TAB>F<TAB>Mujer
 //! ```
 
 use std::fmt;
@@ -21,6 +22,7 @@ use crate::charset::Charset;
 use crate::import::{Imported, import};
 use crate::mapping::{Mapping, TargetField, normal};
 use crate::options::{ColumnType, DateOrder, ImportOptions, Separators};
+use crate::transform::Transform;
 
 /// The extension of a template file.
 pub const EXTENSION: &str = "tvt";
@@ -36,6 +38,8 @@ pub struct FieldLink {
     /// The column's title, when the file had titles. A file with titles is
     /// matched by this alone; `source` serves a file without.
     pub title: Option<String>,
+    /// The changes made to the field's value, in order.
+    pub transforms: Vec<Transform>,
 }
 
 /// A named set of import options and field links.
@@ -97,12 +101,14 @@ impl Template {
         let links = targets
             .iter()
             .zip(&mapping.sources)
-            .filter_map(|(target, source)| {
+            .enumerate()
+            .filter_map(|(i, (target, source))| {
                 let column = imported.columns.get((*source)?)?;
                 Some(FieldLink {
                     field: target.name.clone(),
                     source: column.source,
                     title: column.title.clone(),
+                    transforms: mapping.transforms.get(i).cloned().unwrap_or_default(),
                 })
             })
             .collect();
@@ -124,7 +130,22 @@ impl Template {
     /// stays unmapped, which [`Mapping::missing`] reports if it is required.
     #[must_use]
     pub fn mapping(&self, targets: &[TargetField], imported: &Imported) -> Mapping {
-        let sources = targets
+        let mut mapping = Mapping::new(self.links_sources(targets, imported));
+        mapping.transforms = targets
+            .iter()
+            .map(|target| {
+                self.links
+                    .iter()
+                    .find(|l| l.field == target.name)
+                    .map(|l| l.transforms.clone())
+                    .unwrap_or_default()
+            })
+            .collect();
+        mapping
+    }
+
+    fn links_sources(&self, targets: &[TargetField], imported: &Imported) -> Vec<Option<usize>> {
+        targets
             .iter()
             .map(|target| {
                 let link = self.links.iter().find(|l| l.field == target.name)?;
@@ -146,8 +167,7 @@ impl Template {
                         .position(|c| c.source == link.source),
                 }
             })
-            .collect();
-        Mapping { sources }
+            .collect()
     }
 
     /// The template as text.
@@ -197,6 +217,11 @@ impl Template {
                 escape(&l.field),
                 escape(l.title.as_deref().unwrap_or_default())
             ));
+            for t in &l.transforms {
+                let mut parts = vec![escape(&l.field)];
+                parts.extend(transform_parts(t));
+                out.push_str(&format!("transform = {}\n", parts.join("\t")));
+            }
         }
         out
     }
@@ -236,7 +261,22 @@ impl Template {
                     field,
                     source,
                     title,
+                    transforms: Vec::new(),
                 });
+                continue;
+            }
+            if key == "transform" {
+                let mut parts = value.split('\t').map(unescape);
+                let field = parts.next().unwrap_or_default();
+                let transform = transform_from(parts.collect())
+                    .ok_or_else(|| bad("expected `transform = field<TAB>kind<TAB>arguments`"))?;
+                // Written after its `map` line, so the link exists by now.
+                let link = t
+                    .links
+                    .iter_mut()
+                    .rfind(|l| l.field == field)
+                    .ok_or_else(|| bad("transform for a field with no `map` line before it"))?;
+                link.transforms.push(transform);
                 continue;
             }
             let value = unescape(value);
@@ -389,6 +429,51 @@ fn unescape(s: &str) -> String {
     out
 }
 
+/// The kind of a transform and its arguments, as they follow the field name.
+fn transform_parts(t: &Transform) -> Vec<String> {
+    match t {
+        Transform::Trim => vec!["trim".into()],
+        Transform::Upper => vec!["upper".into()],
+        Transform::Lower => vec!["lower".into()],
+        Transform::Replace { from, to } => vec!["replace".into(), escape(from), escape(to)],
+        Transform::Map { pairs, default } => {
+            let mut v = vec!["map".to_string()];
+            for (from, to) in pairs {
+                v.push(escape(from));
+                v.push(escape(to));
+            }
+            // An odd argument at the end is the default.
+            v.extend(default.iter().map(|d| escape(d)));
+            v
+        }
+        Transform::Expr(e) => vec!["expr".into(), escape(e)],
+    }
+}
+
+/// The inverse of [`transform_parts`], from unescaped parts.
+fn transform_from(parts: Vec<String>) -> Option<Transform> {
+    let (kind, args) = parts.split_first()?;
+    Some(match (kind.as_str(), args) {
+        ("trim", []) => Transform::Trim,
+        ("upper", []) => Transform::Upper,
+        ("lower", []) => Transform::Lower,
+        ("replace", [from, to]) => Transform::Replace {
+            from: from.clone(),
+            to: to.clone(),
+        },
+        ("map", args) => Transform::Map {
+            pairs: args
+                .chunks(2)
+                .filter(|p| p.len() == 2)
+                .map(|p| (p[0].clone(), p[1].clone()))
+                .collect(),
+            default: (args.len() % 2 == 1).then(|| args[args.len() - 1].clone()),
+        },
+        ("expr", [e]) => Transform::Expr(e.clone()),
+        _ => return None,
+    })
+}
+
 fn charset_key(c: Charset) -> &'static str {
     match c {
         Charset::Utf8 => "utf-8",
@@ -448,9 +533,18 @@ mod tests {
         o.set_column_type(3, ColumnType::Hide);
         let imported = import(BANK, &o);
         let targets = [TargetField::new("amount"), TargetField::new("booked_on")];
-        let mapping = Mapping {
-            sources: vec![Some(2), Some(0)],
-        };
+        let mut mapping = Mapping::new(vec![Some(2), Some(0)]);
+        mapping.transforms = vec![
+            vec![],
+            vec![
+                Transform::Trim,
+                Transform::Map {
+                    pairs: vec![("H".into(), "Hom\tbre".into())],
+                    default: Some("?".into()),
+                },
+                Transform::Expr("value + \"\\\"".into()),
+            ],
+        ];
         Template::capture("Bank\nexport", &imported, &targets, &mapping)
     }
 
@@ -468,7 +562,8 @@ mod tests {
             FieldLink {
                 field: "amount".into(),
                 source: 2,
-                title: Some("Importe".into())
+                title: Some("Importe".into()),
+                transforms: vec![],
             }
         );
     }
@@ -535,5 +630,22 @@ mod tests {
         assert_eq!(Template::load_all(&dir), vec![a, b]);
         assert!(Template::load_all(&dir.join("missing")).is_empty());
         std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn the_mapping_carries_the_links_transforms() {
+        let t = full();
+        let targets = [TargetField::new("amount"), TargetField::new("booked_on")];
+        let m = t.mapping(&targets, &t.import(BANK));
+        assert_eq!(m.transforms[1].len(), 3);
+        assert!(m.transforms[0].is_empty());
+    }
+
+    #[test]
+    fn a_transform_without_a_map_line_is_an_error() {
+        let e = Template::from_text("name = x\ntransform = a\ttrim\n").unwrap_err();
+        assert!(matches!(e, TemplateError::Parse(2, _)));
+        let e = Template::from_text("name = x\nmap = 0\ta\t\ntransform = a\tbogus\n").unwrap_err();
+        assert!(matches!(e, TemplateError::Parse(3, _)));
     }
 }

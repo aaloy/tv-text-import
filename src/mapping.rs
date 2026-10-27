@@ -3,6 +3,7 @@
 //! rows rearranged to match.
 
 use crate::import::Imported;
+use crate::transform::{Transform, apply_all};
 use crate::value::Value;
 
 /// One field the application wants filled.
@@ -54,15 +55,26 @@ pub struct Mapping {
     /// By target position: the index into [`Imported::columns`] (and into
     /// each row) feeding it, or `None` to leave the field empty.
     pub sources: Vec<Option<usize>>,
+    /// By target position: the changes [`apply`](Self::apply) makes to the
+    /// field's value, in order. Shorter than `sources` (or empty) means no
+    /// changes for the fields past its end.
+    pub transforms: Vec<Vec<Transform>>,
 }
 
 impl Mapping {
+    /// A mapping of `sources` with no transforms.
+    #[must_use]
+    pub fn new(sources: Vec<Option<usize>>) -> Self {
+        Self {
+            sources,
+            transforms: Vec::new(),
+        }
+    }
+
     /// A mapping with nothing mapped.
     #[must_use]
     pub fn none(targets: &[TargetField]) -> Self {
-        Self {
-            sources: vec![None; targets.len()],
-        }
+        Self::new(vec![None; targets.len()])
     }
 
     /// Matches columns to fields by title, ignoring case, spaces and
@@ -94,7 +106,7 @@ impl Mapping {
                 found
             })
             .collect();
-        Self { sources }
+        Self::new(sources)
     }
 
     /// The required fields nothing is mapped to.
@@ -109,7 +121,8 @@ impl Mapping {
     }
 
     /// The imported rows in the target's order: one value per field,
-    /// [`Value::Empty`] where nothing is mapped.
+    /// [`Value::Empty`] where nothing is mapped, each after the field's
+    /// [`transforms`](Self::transforms).
     #[must_use]
     pub fn apply(&self, imported: &Imported) -> Vec<Vec<Value>> {
         imported
@@ -118,7 +131,14 @@ impl Mapping {
             .map(|row| {
                 self.sources
                     .iter()
-                    .map(|s| s.and_then(|k| row.get(k)).cloned().unwrap_or(Value::Empty))
+                    .enumerate()
+                    .map(|(i, s)| {
+                        let value = s.and_then(|k| row.get(k)).cloned().unwrap_or(Value::Empty);
+                        match self.transforms.get(i) {
+                            Some(t) => apply_all(t, value),
+                            None => value,
+                        }
+                    })
                     .collect()
             })
             .collect()
@@ -196,13 +216,21 @@ mod tests {
     #[test]
     fn apply_reorders_columns_and_pads_unmapped_fields() {
         let i = imported(true);
-        let m = Mapping {
-            sources: vec![Some(1), None, Some(0)],
-        };
+        let m = Mapping::new(vec![Some(1), None, Some(0)]);
         let rows = m.apply(&i);
         assert_eq!(rows.len(), 2);
         assert_eq!(rows[0][0], i.rows[0][1]);
         assert_eq!(rows[0][1], Value::Empty);
         assert_eq!(rows[0][2], i.rows[0][0]);
+    }
+
+    #[test]
+    fn apply_runs_a_fields_transforms_on_its_value() {
+        let i = imported(true);
+        let mut m = Mapping::new(vec![Some(2), Some(0)]);
+        m.transforms = vec![vec![Transform::Upper], vec![]];
+        let rows = m.apply(&i);
+        assert_eq!(rows[0][0], Value::Text("LUZ".into()));
+        assert_eq!(rows[0][1], i.rows[0][0]);
     }
 }

@@ -128,6 +128,30 @@ if let Some(mapping) = FieldMappingDialog::new("Map fields", &targets, &imported
   required one: OK is refused with a message until it has a column.
 - `Mapping::auto`, `missing` and `apply` work without the dialog.
 
+## Transforming values
+
+A field can change its value on the way in: `Mapping::transforms` holds, per
+target field, a list of `Transform`s that `Mapping::apply` runs in order.
+
+```rust
+use tv_text_import::Transform;
+
+mapping.transforms = vec![
+    vec![Transform::Map {
+        pairs: vec![("H".into(), "Hombre".into()), ("F".into(), "Mujer".into())],
+        default: None, // an unlisted code stays as it is
+    }],
+    vec![Transform::Trim, Transform::Upper],
+    vec![Transform::Expr(r#"if(value > 1000, "big", "small")"#.into())],
+];
+```
+
+`Trim`, `Upper`, `Lower`, `Replace` and `Map` need no scripting. `Expr` takes an
+[evalexpr](https://crates.io/crates/evalexpr) expression where `value` is the
+field; a failing expression leaves the value alone, and `Transform::check`
+reports why. Templates save transforms as `transform = ...` lines. The mapping
+dialog does not edit them yet.
+
 ## Templates
 
 A template is the import settings and the field mapping of a kind of file

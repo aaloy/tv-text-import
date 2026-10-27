@@ -66,7 +66,9 @@ impl<'a> FieldMappingDialog<'a> {
             {
                 return None;
             }
-            let mapping = read(&dialog, &combos);
+            let mut mapping = read(&dialog, &combos);
+            // The dialog only picks columns; a template's transforms ride along.
+            mapping.transforms.clone_from(&self.start.transforms);
             let missing = mapping.missing(self.targets);
             if missing.is_empty() {
                 return Some(mapping);
@@ -145,8 +147,8 @@ fn show(dialog: &mut Dialog, combos: &[Handle<ComboBox>], mapping: &Mapping) {
 
 /// The mapping the combo boxes show.
 fn read(dialog: &Dialog, combos: &[Handle<ComboBox>]) -> Mapping {
-    Mapping {
-        sources: combos
+    Mapping::new(
+        combos
             .iter()
             .map(|h| {
                 dialog
@@ -155,7 +157,7 @@ fn read(dialog: &Dialog, combos: &[Handle<ComboBox>]) -> Mapping {
                     .and_then(|i| i.checked_sub(1))
             })
             .collect(),
-    }
+    )
 }
 
 #[cfg(test)]
@@ -177,9 +179,7 @@ mod tests {
         let i = imported();
         let targets = [TargetField::new("amount"), TargetField::new("memo")];
         let (mut dialog, combos) = build("Map", &targets, &i);
-        let mapping = Mapping {
-            sources: vec![Some(1), None],
-        };
+        let mapping = Mapping::new(vec![Some(1), None]);
         show(&mut dialog, &combos, &mapping);
         assert_eq!(dialog.get(combos[0]).unwrap().selected(), Some(2));
         assert_eq!(dialog.get(combos[1]).unwrap().selected(), Some(0));
