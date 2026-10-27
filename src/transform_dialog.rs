@@ -1,8 +1,7 @@
 //! The "Change values" dialogs, for a user who does not write expressions:
 //! pick a field, then say whether to tidy its spaces, change its letters,
 //! and which values in the file to replace by which others (`H` by
-//! `Hombre`). The values the file has in that column are already listed, so
-//! all that is left to type is what to import instead.
+//! `Hombre`), or add text before or after. Only text values change.
 
 use turbo_vision::app::{Application, ModalTick};
 use turbo_vision::core::command::CM_OK;
@@ -17,6 +16,7 @@ use tv_extensions::forms::{Form, size};
 use crate::import::Imported;
 use crate::mapping::{Mapping, TargetField};
 use crate::transform::Transform;
+use crate::value::Value;
 
 /// The `ComboBox` id of the letters choice.
 pub const CASE_COMBO_ID: u16 = 0xE400;
@@ -41,6 +41,10 @@ pub struct Simple {
     pub pairs: Vec<(String, String)>,
     /// What any other value becomes; blank leaves it as it is.
     pub otherwise: String,
+    /// Text put before the value.
+    pub prefix: String,
+    /// Text put after the value.
+    pub suffix: String,
     /// Transforms the dialog does not edit.
     pub rest: Vec<Transform>,
 }
@@ -91,6 +95,8 @@ impl Simple {
                     s.pairs.clone_from(pairs);
                     s.otherwise = default.clone().unwrap_or_default();
                 }
+                Transform::Prefix(p) if s.prefix.is_empty() => s.prefix.clone_from(p),
+                Transform::Suffix(p) if s.suffix.is_empty() => s.suffix.clone_from(p),
                 other => s.rest.push(other.clone()),
             }
         }
@@ -123,43 +129,24 @@ impl Simple {
                 default: (!self.otherwise.is_empty()).then(|| self.otherwise.clone()),
             });
         }
+        if !self.prefix.is_empty() {
+            out.push(Transform::Prefix(self.prefix.clone()));
+        }
+        if !self.suffix.is_empty() {
+            out.push(Transform::Suffix(self.suffix.clone()));
+        }
         out.extend(self.rest.iter().cloned());
         out
     }
 }
 
-/// The values a column has, each once, in the order they appear, up to
-/// `limit`. Empty cells are left out.
+/// Whether any value of `column` is text, the only kind the changes touch.
 #[must_use]
-pub fn distinct_values(imported: &Imported, column: usize, limit: usize) -> Vec<String> {
-    let mut seen: Vec<String> = Vec::new();
-    for row in &imported.rows {
-        let Some(v) = row.get(column).map(ToString::to_string) else {
-            continue;
-        };
-        if !v.is_empty() && !seen.contains(&v) {
-            seen.push(v);
-            if seen.len() == limit {
-                break;
-            }
-        }
-    }
-    seen
-}
-
-/// The pairs the dialog lists: those already set, then the values the file
-/// has that are not set yet (with nothing to import instead), to `rows`.
-fn listed(current: &Simple, in_file: &[String], rows: usize) -> Vec<(String, String)> {
-    let mut pairs = current.pairs.clone();
-    for v in in_file {
-        if pairs.len() >= rows {
-            break;
-        }
-        if !pairs.iter().any(|(from, _)| from == v) {
-            pairs.push((v.clone(), String::new()));
-        }
-    }
-    pairs
+pub fn is_text_column(imported: &Imported, column: usize) -> bool {
+    imported
+        .rows
+        .iter()
+        .any(|r| matches!(r.get(column), Some(Value::Text(_))))
 }
 
 /// Asks what to change in the fields of `mapping`: first which field (when
@@ -172,12 +159,19 @@ pub fn change_values(
     mapping: &mut Mapping,
 ) -> bool {
     let mapped: Vec<usize> = (0..targets.len())
-        .filter(|&i| mapping.sources.get(i).copied().flatten().is_some())
+        .filter(|&i| {
+            mapping
+                .sources
+                .get(i)
+                .copied()
+                .flatten()
+                .is_some_and(|k| is_text_column(imported, k))
+        })
         .collect();
     let Some(&first) = mapped.first() else {
         turbo_vision::views::msgbox::message_box_ok(
             app,
-            "Choose a column for a field first, then change its values.",
+            "Only text can be changed. Choose a column with text for a field first.",
         );
         return false;
     };
@@ -193,8 +187,8 @@ pub fn change_values(
         return false;
     };
     let current = Simple::from_transforms(mapping.transforms.get(field).map_or(&[], Vec::as_slice));
-    let in_file = distinct_values(imported, column, ROWS);
-    let Some(edited) = edit(app, targets[field].shown(), &current, &in_file) else {
+    let _ = column;
+    let Some(edited) = edit(app, targets[field].shown(), &current) else {
         return false;
     };
     if mapping.transforms.len() < targets.len() {
@@ -248,6 +242,8 @@ struct Controls {
     case: Handle<ComboBox>,
     pairs: Vec<(Handle<InputLine>, Handle<InputLine>)>,
     otherwise: Handle<InputLine>,
+    prefix: Handle<InputLine>,
+    suffix: Handle<InputLine>,
 }
 
 fn build(shown: &str) -> (Dialog, Controls) {
@@ -262,12 +258,14 @@ fn build(shown: &str) -> (Dialog, Controls) {
             Case::ALL.iter().map(|c| c.label().to_string()).collect(),
         ),
     );
+    let width = i16::try_from(VALUE_WIDTH / 2).unwrap_or(20);
+    let prefix = form.field("Add ~b~efore", InputLine::new(size(width, 1), VALUE_WIDTH));
+    let suffix = form.field("Add a~f~ter", InputLine::new(size(width, 1), VALUE_WIDTH));
     form.section("Replace values");
     form.row(turbo_vision::views::static_text::StaticText::new(
         size(0, 1),
         "When the file says       Import this instead",
     ));
-    let width = i16::try_from(VALUE_WIDTH / 2).unwrap_or(20);
     let pairs = (0..ROWS)
         .map(|_| {
             let mut line = form.line();
@@ -293,28 +291,35 @@ fn build(shown: &str) -> (Dialog, Controls) {
             case,
             pairs,
             otherwise,
+            prefix,
+            suffix,
         },
     )
 }
 
-fn show(dialog: &mut Dialog, c: &Controls, simple: &Simple, in_file: &[String]) {
+fn show(dialog: &mut Dialog, c: &Controls, simple: &Simple) {
     if let Some(b) = dialog.get_mut(c.trim) {
         b.set_checked(simple.trim);
     }
     if let Some(b) = dialog.get_mut(c.case) {
         b.set_selected(Case::ALL.iter().position(|&k| k == simple.case));
     }
-    let pairs = listed(simple, in_file, c.pairs.len());
-    for (&(from, to), (f, t)) in c.pairs.iter().zip(pairs) {
+    for (&(from, to), (f, t)) in c.pairs.iter().zip(&simple.pairs) {
         if let Some(i) = dialog.get_mut(from) {
-            i.set_text(f);
+            i.set_text(f.clone());
         }
         if let Some(i) = dialog.get_mut(to) {
-            i.set_text(t);
+            i.set_text(t.clone());
         }
     }
-    if let Some(i) = dialog.get_mut(c.otherwise) {
-        i.set_text(simple.otherwise.clone());
+    for (h, text) in [
+        (c.otherwise, &simple.otherwise),
+        (c.prefix, &simple.prefix),
+        (c.suffix, &simple.suffix),
+    ] {
+        if let Some(i) = dialog.get_mut(h) {
+            i.set_text(text.clone());
+        }
     }
 }
 
@@ -340,21 +345,23 @@ fn read(dialog: &Dialog, c: &Controls, before: &Simple) -> Simple {
             .unwrap_or_default(),
         pairs,
         otherwise: text(c.otherwise),
+        prefix: dialog
+            .get(c.prefix)
+            .map(|i| i.text().to_string())
+            .unwrap_or_default(),
+        suffix: dialog
+            .get(c.suffix)
+            .map(|i| i.text().to_string())
+            .unwrap_or_default(),
         rest: before.rest.clone(),
     }
 }
 
-/// Shows the editing dialog for `current`; `in_file` are the values the
-/// column has, offered as the left-hand side. `None` on Cancel.
-fn edit(
-    app: &mut Application,
-    shown: &str,
-    current: &Simple,
-    in_file: &[String],
-) -> Option<Simple> {
+/// Shows the editing dialog for `current`. `None` on Cancel.
+fn edit(app: &mut Application, shown: &str, current: &Simple) -> Option<Simple> {
     let (mut dialog, controls) = build(shown);
     dialog.prepare_modal(app);
-    show(&mut dialog, &controls, current, in_file);
+    show(&mut dialog, &controls, current);
     if app.execute_modal(&mut dialog, |_, _| ModalTick::Continue) != CM_OK {
         return None;
     }
@@ -378,6 +385,8 @@ mod tests {
             case: Case::Upper,
             pairs: sex(),
             otherwise: "?".into(),
+            prefix: "ES".into(),
+            suffix: "!".into(),
             rest: vec![Transform::Expr("value".into())],
         };
         assert_eq!(Simple::from_transforms(&s.to_transforms()), s);
@@ -392,35 +401,13 @@ mod tests {
     }
 
     #[test]
-    fn the_file_values_not_yet_set_are_offered() {
-        let current = Simple {
-            pairs: vec![("H".into(), "Hombre".into())],
-            ..Simple::default()
-        };
-        let listed = listed(&current, &["H".into(), "F".into(), "X".into()], 8);
-        assert_eq!(
-            listed,
-            vec![
-                ("H".into(), "Hombre".into()),
-                ("F".into(), String::new()),
-                ("X".into(), String::new())
-            ]
-        );
-        assert_eq!(listed_len(&current, 2), 2);
-    }
-
-    fn listed_len(current: &Simple, rows: usize) -> usize {
-        listed(current, &["H".into(), "F".into(), "X".into()], rows).len()
-    }
-
-    #[test]
-    fn distinct_values_come_in_file_order_without_repeats_or_blanks() {
-        let data = b"sex\nH\nF\nH\n\nX\n";
+    fn only_text_columns_can_be_changed() {
+        let data = b"name;qty\nana;5\nluis;7\n";
         let mut o = detect_options(data, &ImportOptions::default());
         o.first_row_titles = true;
         let i = import(data, &o);
-        assert_eq!(distinct_values(&i, 0, 8), ["H", "F", "X"]);
-        assert_eq!(distinct_values(&i, 0, 2), ["H", "F"]);
+        assert!(is_text_column(&i, 0));
+        assert!(!is_text_column(&i, 1));
     }
 
     #[test]
@@ -431,9 +418,11 @@ mod tests {
             case: Case::Lower,
             pairs: sex(),
             otherwise: "?".into(),
+            prefix: "ES".into(),
+            suffix: "!".into(),
             rest: vec![Transform::Expr("value".into())],
         };
-        show(&mut dialog, &c, &before, &["H".into(), "X".into()]);
+        show(&mut dialog, &c, &before);
         let read_back = read(&dialog, &c, &before);
         // Blank rows are shown for typing in; they change nothing.
         assert_eq!(read_back.to_transforms(), before.to_transforms());

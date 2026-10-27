@@ -446,6 +446,8 @@ fn transform_parts(t: &Transform) -> Vec<String> {
             v.extend(default.iter().map(|d| escape(d)));
             v
         }
+        Transform::Prefix(p) => vec!["prefix".into(), escape(p)],
+        Transform::Suffix(p) => vec!["suffix".into(), escape(p)],
         Transform::Expr(e) => vec!["expr".into(), escape(e)],
     }
 }
@@ -469,6 +471,8 @@ fn transform_from(parts: Vec<String>) -> Option<Transform> {
                 .collect(),
             default: (args.len() % 2 == 1).then(|| args[args.len() - 1].clone()),
         },
+        ("prefix", [p]) => Transform::Prefix(p.clone()),
+        ("suffix", [p]) => Transform::Suffix(p.clone()),
         ("expr", [e]) => Transform::Expr(e.clone()),
         _ => return None,
     })
@@ -542,6 +546,8 @@ mod tests {
                     pairs: vec![("H".into(), "Hom\tbre".into())],
                     default: Some("?".into()),
                 },
+                Transform::Prefix("a\tb".into()),
+                Transform::Suffix("-".into()),
                 Transform::Expr("value + \"\\\"".into()),
             ],
         ];
@@ -637,7 +643,7 @@ mod tests {
         let t = full();
         let targets = [TargetField::new("amount"), TargetField::new("booked_on")];
         let m = t.mapping(&targets, &t.import(BANK));
-        assert_eq!(m.transforms[1].len(), 3);
+        assert_eq!(m.transforms[1].len(), 5);
         assert!(m.transforms[0].is_empty());
     }
 

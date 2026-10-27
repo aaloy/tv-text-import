@@ -30,8 +30,11 @@ pub enum Transform {
         /// What an unlisted value becomes.
         default: Option<String>,
     },
-    /// Evaluates an [`evalexpr`] expression where `value` is the field: text
-    /// is a string, a number a float, a date its `YYYY-MM-DD` string.
+    /// Puts text before the value.
+    Prefix(String),
+    /// Puts text after the value.
+    Suffix(String),
+    /// Evaluates an [`evalexpr`] expression where `value` is the field's text.
     /// For example `if(value == "H", "Hombre", "Mujer")` or
     /// `str::to_uppercase(value)`. A string result is text, a number a
     /// number; an expression that fails leaves the value as it was.
@@ -39,27 +42,29 @@ pub enum Transform {
 }
 
 impl Transform {
-    /// `value` after the change. [`Value::Empty`] stays empty, except
-    /// through [`Expr`](Self::Expr), which sees it as an empty string.
+    /// `value` after the change. Only text is changed: a number, a date or
+    /// an empty field comes back as it was, so the same transforms can sit
+    /// on a field whatever the file holds.
     #[must_use]
     pub fn apply(&self, value: &Value) -> Value {
+        let Value::Text(text) = value else {
+            return value.clone();
+        };
         match self {
-            Transform::Expr(expr) => eval(expr, value).unwrap_or_else(|| value.clone()),
-            _ if *value == Value::Empty => Value::Empty,
-            Transform::Trim => text_of(value, |t| t.trim().to_string()),
-            Transform::Upper => text_of(value, str::to_uppercase),
-            Transform::Lower => text_of(value, str::to_lowercase),
+            Transform::Trim => Value::Text(text.trim().to_string()),
+            Transform::Upper => Value::Text(text.to_uppercase()),
+            Transform::Lower => Value::Text(text.to_lowercase()),
             Transform::Replace { from, to } if !from.is_empty() => {
-                text_of(value, |t| t.replace(from.as_str(), to))
+                Value::Text(text.replace(from.as_str(), to))
             }
             Transform::Replace { .. } => value.clone(),
-            Transform::Map { pairs, default } => {
-                let text = value.to_string();
-                match pairs.iter().find(|(k, _)| *k == text) {
-                    Some((_, v)) => Value::Text(v.clone()),
-                    None => default.clone().map_or_else(|| value.clone(), Value::Text),
-                }
-            }
+            Transform::Prefix(p) => Value::Text(format!("{p}{text}")),
+            Transform::Suffix(p) => Value::Text(format!("{text}{p}")),
+            Transform::Map { pairs, default } => match pairs.iter().find(|(k, _)| k == text) {
+                Some((_, v)) => Value::Text(v.clone()),
+                None => default.clone().map_or_else(|| value.clone(), Value::Text),
+            },
+            Transform::Expr(expr) => eval(expr, text).unwrap_or_else(|| value.clone()),
         }
     }
 
@@ -73,7 +78,7 @@ impl Transform {
         let Transform::Expr(expr) = self else {
             return Ok(());
         };
-        evalexpr::eval_with_context(expr, &context(&Value::Text("x".into())))
+        evalexpr::eval_with_context(expr, &context("x"))
             .map(|_| ())
             .map_err(|e| e.to_string())
     }
@@ -85,36 +90,17 @@ pub fn apply_all(transforms: &[Transform], value: Value) -> Value {
     transforms.iter().fold(value, |v, t| t.apply(&v))
 }
 
-/// Text changed by `f`; a number or date is changed through its text form.
-fn text_of(value: &Value, f: impl Fn(&str) -> String) -> Value {
-    match value {
-        Value::Text(t) => Value::Text(f(t)),
-        other => {
-            let changed = f(&other.to_string());
-            if changed == other.to_string() {
-                other.clone()
-            } else {
-                Value::Text(changed)
-            }
-        }
-    }
-}
-
-fn context(value: &Value) -> HashMapContext<DefaultNumericTypes> {
-    let v = match value {
-        Value::Empty => evalexpr::Value::String(String::new()),
-        Value::Number(n) => evalexpr::Value::Float(*n),
-        other => evalexpr::Value::String(other.to_string()),
-    };
+fn context(text: &str) -> HashMapContext<DefaultNumericTypes> {
+    let v = evalexpr::Value::String(text.to_string());
     let mut ctx = HashMapContext::new();
     // A fresh context cannot refuse a variable.
     let _ = ctx.set_value("value".to_string(), v);
     ctx
 }
 
-fn eval(expr: &str, value: &Value) -> Option<Value> {
+fn eval(expr: &str, text: &str) -> Option<Value> {
     Some(
-        match evalexpr::eval_with_context(expr, &context(value)).ok()? {
+        match evalexpr::eval_with_context(expr, &context(text)).ok()? {
             evalexpr::Value::String(s) if s.is_empty() => Value::Empty,
             evalexpr::Value::String(s) => Value::Text(s),
             evalexpr::Value::Float(f) => Value::Number(f),
@@ -167,7 +153,29 @@ mod tests {
             to: "".into(),
         };
         assert_eq!(r.apply(&text("12-34")), text("1234"));
-        assert_eq!(r.apply(&Value::Number(5.0)), Value::Number(5.0));
+        assert_eq!(
+            Transform::Prefix("ES".into()).apply(&text("12")),
+            text("ES12")
+        );
+        assert_eq!(
+            Transform::Suffix("!".into()).apply(&text("12")),
+            text("12!")
+        );
+    }
+
+    #[test]
+    fn only_text_is_changed() {
+        let date = Value::Date(chrono::NaiveDate::from_ymd_opt(2026, 1, 2).unwrap());
+        for t in [
+            Transform::Upper,
+            Transform::Prefix("x".into()),
+            sex(),
+            Transform::Expr("\"x\"".into()),
+        ] {
+            assert_eq!(t.apply(&Value::Number(5.0)), Value::Number(5.0));
+            assert_eq!(t.apply(&date), date);
+            assert_eq!(t.apply(&Value::Empty), Value::Empty);
+        }
     }
 
     #[test]
@@ -175,8 +183,8 @@ mod tests {
         let e = Transform::Expr(r#"if(value == "H", "Hombre", "Mujer")"#.into());
         assert_eq!(e.apply(&text("H")), text("Hombre"));
         assert_eq!(e.apply(&text("F")), text("Mujer"));
-        let n = Transform::Expr("value * 100".into());
-        assert_eq!(n.apply(&Value::Number(1.5)), Value::Number(150.0));
+        let n = Transform::Expr("str::from(1 + 1)".into());
+        assert_eq!(n.apply(&text("a")), text("2"));
         let u = Transform::Expr("str::to_uppercase(value)".into());
         assert_eq!(u.apply(&text("ab")), text("AB"));
     }
