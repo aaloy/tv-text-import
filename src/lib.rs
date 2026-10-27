@@ -47,6 +47,7 @@ pub mod split;
 pub mod template;
 pub mod template_dialog;
 pub mod transform;
+pub mod transform_dialog;
 pub mod value;
 
 pub use charset::Charset;

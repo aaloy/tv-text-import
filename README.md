@@ -149,8 +149,13 @@ mapping.transforms = vec![
 `Trim`, `Upper`, `Lower`, `Replace` and `Map` need no scripting. `Expr` takes an
 [evalexpr](https://crates.io/crates/evalexpr) expression where `value` is the
 field; a failing expression leaves the value alone, and `Transform::check`
-reports why. Templates save transforms as `transform = ...` lines. The mapping
-dialog does not edit them yet.
+reports why. Templates save transforms as `transform = ...` lines.
+
+The field mapping dialog has a **Change values...** button for users who do not
+write code. It asks which field, then offers: remove spaces, ALL CAPITALS or
+lowercase, and a table of "when the file says / import this instead" with the
+column's own values already listed, so only the new text is typed. Anything
+else a template holds (`Replace`, `Expr`) is kept when the field is edited.
 
 ## Templates
 
