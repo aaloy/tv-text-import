@@ -9,11 +9,13 @@ keywords = ["tui", "turbo-vision", "csv", "import"]
 categories = ["command-line-interface", "parser-implementations"]
 
 [dependencies]
-# The fork's integration branch: frozen table panes, GroupBox, Form and
-# Unicode text input are not on crates.io yet. Switch to a crates.io
-# version once they are released.
-turbo-vision = { git = "https://github.com/aaloy/turbo-vision-4-rust", branch = "integration/all" }
+# One copy of turbo-vision with the application: it patches this crates.io
+# requirement with the fork's integration branch (frozen table panes,
+# GroupBox, Unicode text input).
+turbo-vision = "4.1.0"
+# `Form` lives here, on the branch the application uses.
+tv-extensions = { git = "https://github.com/aaloy/tv-extensions", branch = "feat/forms-edit-synced", features = ["native"] }
 chrono = { version = "0.4.45", default-features = false, features = ["std"] }
 
 [dev-dependencies]
-turbo-vision = { git = "https://github.com/aaloy/turbo-vision-4-rust", branch = "integration/all", features = ["test-util"] }
+turbo-vision = { version = "4.1.0", features = ["test-util"] }

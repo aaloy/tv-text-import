@@ -6,9 +6,9 @@ use turbo_vision::core::command::CM_OK;
 use turbo_vision::views::GroupLike;
 use turbo_vision::views::combo_box::ComboBox;
 use turbo_vision::views::dialog::Dialog;
-use turbo_vision::views::form::{Form, size};
 use turbo_vision::views::handle::Handle;
 use turbo_vision::views::msgbox::message_box_ok;
+use tv_extensions::forms::{Form, size};
 
 use crate::import::Imported;
 use crate::mapping::{Mapping, TargetField};
