@@ -128,6 +128,42 @@ if let Some(mapping) = FieldMappingDialog::new("Map fields", &targets, &imported
   required one: OK is refused with a message until it has a column.
 - `Mapping::auto`, `missing` and `apply` work without the dialog.
 
+## Transforming values
+
+A field can change its value on the way in: `Mapping::transforms` holds, per
+target field, a list of `Transform`s that `Mapping::apply` runs in order. What
+a transform does depends on the type of the value:
+
+| Value | Transforms |
+|---|---|
+| Text | `Trim`, `Upper`, `Lower`, `Replace`, `Prefix`, `Suffix`, `Map` (a table, such as `H` to `Hombre`) |
+| Number | `Expr`, an [evalexpr](https://crates.io/crates/evalexpr) formula where `value` is the number: `value * -1`, `value / 100`, `if(value < 0, 0, value)` |
+| Date, empty | none; they pass through untouched |
+
+```rust
+use tv_text_import::Transform;
+
+mapping.transforms = vec![
+    vec![Transform::Map {
+        pairs: vec![("H".into(), "Hombre".into()), ("F".into(), "Mujer".into())],
+        default: None, // an unlisted code stays as it is
+    }],
+    vec![Transform::Trim, Transform::Prefix("ES".into())],
+    vec![Transform::Expr("value / 100".into())],
+];
+```
+
+A transform meant for another type does nothing, and a formula that fails
+leaves the number alone; `Transform::check` reports why. Templates save
+transforms as `transform = ...` lines.
+
+The field mapping dialog has a **Change values...** button for users who do not
+write code. It asks which field, then offers what fits the column: for text,
+remove spaces, ALL CAPITALS or lowercase, add text before or after, and a table
+of "when the file says / import this instead"; for numbers, a formula with
+examples, checked before OK is accepted. Date columns have nothing to change.
+Transforms the dialog does not edit are kept when a field is edited.
+
 ## Templates
 
 A template is the import settings and the field mapping of a kind of file

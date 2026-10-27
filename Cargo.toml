@@ -16,6 +16,7 @@ turbo-vision = "4.1.0"
 # `Form` lives here, on the branch the application uses.
 tv-extensions = { git = "https://github.com/aaloy/tv-extensions", branch = "feat/forms-edit-synced", features = ["native"] }
 chrono = { version = "0.4.45", default-features = false, features = ["std"] }
+evalexpr = { version = "13", default-features = false }
 
 [dev-dependencies]
 turbo-vision = { version = "4.1.0", features = ["test-util"] }

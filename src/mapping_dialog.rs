@@ -2,7 +2,7 @@
 //! listing the imported columns, to run after the Text Import dialog.
 
 use turbo_vision::app::Application;
-use turbo_vision::core::command::CM_OK;
+use turbo_vision::core::command::{CM_CANCEL, CM_OK, CM_USER, CommandId};
 use turbo_vision::views::GroupLike;
 use turbo_vision::views::combo_box::ComboBox;
 use turbo_vision::views::dialog::Dialog;
@@ -12,11 +12,16 @@ use tv_extensions::forms::{Form, size};
 
 use crate::import::Imported;
 use crate::mapping::{Mapping, TargetField};
+use crate::transform::Transform;
+use crate::transform_dialog::change_values;
 
 /// The first `ComboBox` id the dialog uses; it takes one per target field.
 /// Combo box ids must be unique among the combo boxes alive at the same
 /// time, and these do not overlap the Text Import dialog's.
 pub const FIRST_MAPPING_COMBO_ID: u16 = 0xE200;
+
+/// The "Change values" button.
+const CM_CHANGE_VALUES: CommandId = CM_USER + 0x7E10;
 
 /// The widest a column's entry in the combo box gets.
 const ENTRY_WIDTH: usize = 40;
@@ -60,13 +65,25 @@ impl<'a> FieldMappingDialog<'a> {
         let (mut dialog, combos) = build(&self.title, self.targets, self.imported);
         dialog.prepare_modal(app);
         show(&mut dialog, &combos, &self.start);
+        let mut transforms: Vec<Vec<Transform>> = self.start.transforms.clone();
         loop {
-            if app.execute_modal(&mut dialog, |_, _| turbo_vision::app::ModalTick::Continue)
-                != CM_OK
-            {
+            let command =
+                app.execute_modal(&mut dialog, |_, _| turbo_vision::app::ModalTick::Continue);
+            if command == CM_CHANGE_VALUES {
+                let mut mapping = read(&dialog, &combos);
+                mapping.transforms.clone_from(&transforms);
+                if change_values(app, self.targets, self.imported, &mut mapping) {
+                    transforms = mapping.transforms;
+                }
+                // The button closed the dialog; open it again as it was.
+                dialog.end_modal(0);
+                continue;
+            }
+            if command != CM_OK {
                 return None;
             }
-            let mapping = read(&dialog, &combos);
+            let mut mapping = read(&dialog, &combos);
+            mapping.transforms = transforms.clone();
             let missing = mapping.missing(self.targets);
             if missing.is_empty() {
                 return Some(mapping);
@@ -129,7 +146,9 @@ fn build(
         })
         .collect();
     form.end_group();
-    form.ok_cancel();
+    form.default_button("~O~K", CM_OK);
+    form.button("~C~hange values...", CM_CHANGE_VALUES);
+    form.button("Cancel", CM_CANCEL);
     (form.build(), combos)
 }
 
@@ -145,8 +164,8 @@ fn show(dialog: &mut Dialog, combos: &[Handle<ComboBox>], mapping: &Mapping) {
 
 /// The mapping the combo boxes show.
 fn read(dialog: &Dialog, combos: &[Handle<ComboBox>]) -> Mapping {
-    Mapping {
-        sources: combos
+    Mapping::new(
+        combos
             .iter()
             .map(|h| {
                 dialog
@@ -155,7 +174,7 @@ fn read(dialog: &Dialog, combos: &[Handle<ComboBox>]) -> Mapping {
                     .and_then(|i| i.checked_sub(1))
             })
             .collect(),
-    }
+    )
 }
 
 #[cfg(test)]
@@ -177,9 +196,7 @@ mod tests {
         let i = imported();
         let targets = [TargetField::new("amount"), TargetField::new("memo")];
         let (mut dialog, combos) = build("Map", &targets, &i);
-        let mapping = Mapping {
-            sources: vec![Some(1), None],
-        };
+        let mapping = Mapping::new(vec![Some(1), None]);
         show(&mut dialog, &combos, &mapping);
         assert_eq!(dialog.get(combos[0]).unwrap().selected(), Some(2));
         assert_eq!(dialog.get(combos[1]).unwrap().selected(), Some(0));

@@ -46,6 +46,8 @@ pub mod options;
 pub mod split;
 pub mod template;
 pub mod template_dialog;
+pub mod transform;
+pub mod transform_dialog;
 pub mod value;
 
 pub use charset::Charset;
@@ -56,4 +58,5 @@ pub use mapping_dialog::FieldMappingDialog;
 pub use options::{ColumnType, DateOrder, ImportOptions, Separators};
 pub use template::{FieldLink, Template, TemplateError};
 pub use template_dialog::choose_template;
+pub use transform::Transform;
 pub use value::Value;
