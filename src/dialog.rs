@@ -12,12 +12,12 @@ use turbo_vision::core::command::{CM_OK, CM_USER, CommandId};
 use turbo_vision::views::checkbox::CheckBox;
 use turbo_vision::views::combo_box::ComboBox;
 use turbo_vision::views::dialog::Dialog;
-use turbo_vision::views::form::{Form, size};
 use turbo_vision::views::handle::Handle;
 use turbo_vision::views::input_line::InputLine;
 use turbo_vision::views::spinner::Spinner;
 use turbo_vision::views::table::{Column, Table};
 use turbo_vision::views::{GroupLike, View};
+use tv_extensions::forms::{Form, size};
 
 use crate::charset::Charset;
 use crate::import::{Imported, detect_options, import};

@@ -193,11 +193,18 @@ The `examples/data` samples cover the cases above:
 
 ## Requirements
 
-It depends on the `integration/all` branch of
-[aaloy/turbo-vision-4-rust](https://github.com/aaloy/turbo-vision-4-rust). That
-branch has `Form`, `GroupBox`, frozen table panes and Unicode text input,
-which are not yet in a crates.io release. Once they are released, the
-dependency will move to crates.io.
+`Form` and `GroupBox`-based layouts come from
+[tv-extensions](https://github.com/aaloy/tv-extensions) (branch
+`feat/forms-edit-synced` until released). The crate asks crates.io for
+turbo-vision 4.1; the frozen table panes and Unicode text input it uses are
+on the `integration/all` branch of
+[aaloy/turbo-vision-4-rust](https://github.com/aaloy/turbo-vision-4-rust), so
+an application patches `turbo-vision` with it so that one copy is shared:
+
+```toml
+[patch.crates-io]
+turbo-vision = { git = "https://github.com/aaloy/turbo-vision-4-rust", branch = "integration/all" }
+```
 
 ## Not yet
 

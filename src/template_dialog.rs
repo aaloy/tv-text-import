@@ -4,7 +4,7 @@ use turbo_vision::app::Application;
 use turbo_vision::core::command::CM_OK;
 use turbo_vision::views::GroupLike;
 use turbo_vision::views::combo_box::ComboBox;
-use turbo_vision::views::form::{Form, size};
+use tv_extensions::forms::{Form, size};
 
 use crate::template::Template;
 
