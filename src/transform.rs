@@ -34,19 +34,26 @@ pub enum Transform {
     Prefix(String),
     /// Puts text after the value.
     Suffix(String),
-    /// Evaluates an [`evalexpr`] expression where `value` is the field's text.
-    /// For example `if(value == "H", "Hombre", "Mujer")` or
-    /// `str::to_uppercase(value)`. A string result is text, a number a
-    /// number; an expression that fails leaves the value as it was.
+    /// Evaluates an [`evalexpr`] formula where `value` is the field's number,
+    /// such as `value * -1`, `value / 100` or `if(value < 0, 0, value)`.
+    /// For numbers only; a formula that fails or does not give a number
+    /// leaves the value as it was.
     Expr(String),
 }
 
 impl Transform {
-    /// `value` after the change. Only text is changed: a number, a date or
-    /// an empty field comes back as it was, so the same transforms can sit
-    /// on a field whatever the file holds.
+    /// `value` after the change. Each transform has a kind of value it
+    /// works on: [`Expr`](Self::Expr) on numbers, all the others on text.
+    /// Any other value, a date or an empty field comes back as it was, so
+    /// the same transforms can sit on a field whatever the file holds.
     #[must_use]
     pub fn apply(&self, value: &Value) -> Value {
+        if let Transform::Expr(expr) = self {
+            return match value {
+                Value::Number(n) => eval(expr, *n).unwrap_or_else(|| value.clone()),
+                _ => value.clone(),
+            };
+        }
         let Value::Text(text) = value else {
             return value.clone();
         };
@@ -64,7 +71,7 @@ impl Transform {
                 Some((_, v)) => Value::Text(v.clone()),
                 None => default.clone().map_or_else(|| value.clone(), Value::Text),
             },
-            Transform::Expr(expr) => eval(expr, text).unwrap_or_else(|| value.clone()),
+            Transform::Expr(_) => unreachable!("handled above"),
         }
     }
 
@@ -78,9 +85,11 @@ impl Transform {
         let Transform::Expr(expr) = self else {
             return Ok(());
         };
-        evalexpr::eval_with_context(expr, &context("x"))
-            .map(|_| ())
-            .map_err(|e| e.to_string())
+        match evalexpr::eval_with_context(expr, &context(1.0)) {
+            Ok(evalexpr::Value::Float(_) | evalexpr::Value::Int(_)) => Ok(()),
+            Ok(_) => Err("the formula must give a number".to_string()),
+            Err(e) => Err(e.to_string()),
+        }
     }
 }
 
@@ -90,27 +99,20 @@ pub fn apply_all(transforms: &[Transform], value: Value) -> Value {
     transforms.iter().fold(value, |v, t| t.apply(&v))
 }
 
-fn context(text: &str) -> HashMapContext<DefaultNumericTypes> {
-    let v = evalexpr::Value::String(text.to_string());
+fn context(number: f64) -> HashMapContext<DefaultNumericTypes> {
     let mut ctx = HashMapContext::new();
     // A fresh context cannot refuse a variable.
-    let _ = ctx.set_value("value".to_string(), v);
+    let _ = ctx.set_value("value".to_string(), evalexpr::Value::Float(number));
     ctx
 }
 
-fn eval(expr: &str, text: &str) -> Option<Value> {
-    Some(
-        match evalexpr::eval_with_context(expr, &context(text)).ok()? {
-            evalexpr::Value::String(s) if s.is_empty() => Value::Empty,
-            evalexpr::Value::String(s) => Value::Text(s),
-            evalexpr::Value::Float(f) => Value::Number(f),
-            #[allow(clippy::cast_precision_loss)]
-            evalexpr::Value::Int(i) => Value::Number(i as f64),
-            evalexpr::Value::Boolean(b) => Value::Text(b.to_string()),
-            evalexpr::Value::Empty => Value::Empty,
-            evalexpr::Value::Tuple(_) => return None,
-        },
-    )
+fn eval(expr: &str, number: f64) -> Option<Value> {
+    match evalexpr::eval_with_context(expr, &context(number)).ok()? {
+        evalexpr::Value::Float(f) => Some(Value::Number(f)),
+        #[allow(clippy::cast_precision_loss)]
+        evalexpr::Value::Int(i) => Some(Value::Number(i as f64)),
+        _ => None,
+    }
 }
 
 #[cfg(test)]
@@ -164,14 +166,9 @@ mod tests {
     }
 
     #[test]
-    fn only_text_is_changed() {
+    fn text_transforms_leave_everything_but_text_alone() {
         let date = Value::Date(chrono::NaiveDate::from_ymd_opt(2026, 1, 2).unwrap());
-        for t in [
-            Transform::Upper,
-            Transform::Prefix("x".into()),
-            sex(),
-            Transform::Expr("\"x\"".into()),
-        ] {
+        for t in [Transform::Upper, Transform::Prefix("x".into()), sex()] {
             assert_eq!(t.apply(&Value::Number(5.0)), Value::Number(5.0));
             assert_eq!(t.apply(&date), date);
             assert_eq!(t.apply(&Value::Empty), Value::Empty);
@@ -179,22 +176,26 @@ mod tests {
     }
 
     #[test]
-    fn expressions_see_the_field_as_value() {
-        let e = Transform::Expr(r#"if(value == "H", "Hombre", "Mujer")"#.into());
-        assert_eq!(e.apply(&text("H")), text("Hombre"));
-        assert_eq!(e.apply(&text("F")), text("Mujer"));
-        let n = Transform::Expr("str::from(1 + 1)".into());
-        assert_eq!(n.apply(&text("a")), text("2"));
-        let u = Transform::Expr("str::to_uppercase(value)".into());
-        assert_eq!(u.apply(&text("ab")), text("AB"));
+    fn formulas_change_numbers_only() {
+        let date = Value::Date(chrono::NaiveDate::from_ymd_opt(2026, 1, 2).unwrap());
+        let neg = Transform::Expr("value * -1".into());
+        assert_eq!(neg.apply(&Value::Number(45.2)), Value::Number(-45.2));
+        let cap = Transform::Expr("if(value < 0, 0, value)".into());
+        assert_eq!(cap.apply(&Value::Number(-3.0)), Value::Number(0.0));
+        assert_eq!(cap.apply(&Value::Number(3.0)), Value::Number(3.0));
+        assert_eq!(neg.apply(&text("12")), text("12"));
+        assert_eq!(neg.apply(&date), date);
+        assert_eq!(neg.apply(&Value::Empty), Value::Empty);
     }
 
     #[test]
-    fn a_failing_expression_leaves_the_value_and_check_says_why() {
+    fn a_failing_formula_leaves_the_value_and_check_says_why() {
         let bad = Transform::Expr("value +".into());
-        assert_eq!(bad.apply(&text("a")), text("a"));
+        assert_eq!(bad.apply(&Value::Number(1.0)), Value::Number(1.0));
         assert!(bad.check().is_err());
-        assert!(Transform::Expr("value".into()).check().is_ok());
+        assert!(Transform::Expr("\"text\"".into()).check().is_err());
+        assert!(Transform::Expr("value / 100".into()).check().is_ok());
+        assert!(Transform::Upper.check().is_ok());
     }
 
     #[test]

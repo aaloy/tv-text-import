@@ -140,13 +140,69 @@ impl Simple {
     }
 }
 
-/// Whether any value of `column` is text, the only kind the changes touch.
+/// What a column holds, which decides the changes it is offered.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Kind {
+    /// Some of it is a number: a formula can change it.
+    Number,
+    /// Text, with no numbers: spaces, letters, prefix, suffix, value table.
+    Text,
+    /// Dates or nothing: there is nothing to change.
+    Other,
+}
+
+/// The [`Kind`] of `column`. A column with a few text cells among numbers
+/// (`n/a`) is still a number column.
 #[must_use]
-pub fn is_text_column(imported: &Imported, column: usize) -> bool {
-    imported
-        .rows
-        .iter()
-        .any(|r| matches!(r.get(column), Some(Value::Text(_))))
+pub fn column_kind(imported: &Imported, column: usize) -> Kind {
+    let mut text = false;
+    for v in imported.rows.iter().filter_map(|r| r.get(column)) {
+        match v {
+            Value::Number(_) => return Kind::Number,
+            Value::Text(_) => text = true,
+            _ => {}
+        }
+    }
+    if text { Kind::Text } else { Kind::Other }
+}
+
+/// The formula of a number field and the transforms the dialog leaves be.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct Formula {
+    /// The formula, such as `value * -1`; blank for none.
+    pub expr: String,
+    /// Transforms the dialog does not edit.
+    pub rest: Vec<Transform>,
+}
+
+impl Formula {
+    /// Reads a field's transforms: the first formula; the rest are kept.
+    #[must_use]
+    pub fn from_transforms(transforms: &[Transform]) -> Self {
+        let mut f = Formula::default();
+        let mut have = false;
+        for t in transforms {
+            match t {
+                Transform::Expr(e) if !have => {
+                    have = true;
+                    f.expr.clone_from(e);
+                }
+                other => f.rest.push(other.clone()),
+            }
+        }
+        f
+    }
+
+    /// The transforms to store: the formula, then the ones kept.
+    #[must_use]
+    pub fn to_transforms(&self) -> Vec<Transform> {
+        let mut out = Vec::new();
+        if !self.expr.trim().is_empty() {
+            out.push(Transform::Expr(self.expr.trim().to_string()));
+        }
+        out.extend(self.rest.iter().cloned());
+        out
+    }
 }
 
 /// Asks what to change in the fields of `mapping`: first which field (when
@@ -165,13 +221,13 @@ pub fn change_values(
                 .get(i)
                 .copied()
                 .flatten()
-                .is_some_and(|k| is_text_column(imported, k))
+                .is_some_and(|k| column_kind(imported, k) != Kind::Other)
         })
         .collect();
     let Some(&first) = mapped.first() else {
         turbo_vision::views::msgbox::message_box_ok(
             app,
-            "Only text can be changed. Choose a column with text for a field first.",
+            "Only text and numbers can be changed. Choose a column with text or numbers for a field first.",
         );
         return false;
     };
@@ -186,15 +242,21 @@ pub fn change_values(
     let Some(column) = mapping.sources[field] else {
         return false;
     };
-    let current = Simple::from_transforms(mapping.transforms.get(field).map_or(&[], Vec::as_slice));
-    let _ = column;
-    let Some(edited) = edit(app, targets[field].shown(), &current) else {
+    let before = mapping.transforms.get(field).map_or(&[][..], Vec::as_slice);
+    let shown = targets[field].shown();
+    let edited = match column_kind(imported, column) {
+        Kind::Number => {
+            edit_formula(app, shown, &Formula::from_transforms(before)).map(|f| f.to_transforms())
+        }
+        _ => edit(app, shown, &Simple::from_transforms(before)).map(|s| s.to_transforms()),
+    };
+    let Some(edited) = edited else {
         return false;
     };
     if mapping.transforms.len() < targets.len() {
         mapping.transforms.resize(targets.len(), Vec::new());
     }
-    mapping.transforms[field] = edited.to_transforms();
+    mapping.transforms[field] = edited;
     true
 }
 
@@ -368,6 +430,60 @@ fn edit(app: &mut Application, shown: &str, current: &Simple) -> Option<Simple> 
     Some(read(&dialog, &controls, current))
 }
 
+/// The `InputLine` width of the formula.
+const FORMULA_WIDTH: i16 = 36;
+
+/// Shows the formula dialog for `current`, asking again while the formula
+/// does not work. `None` on Cancel.
+fn edit_formula(app: &mut Application, shown: &str, current: &Formula) -> Option<Formula> {
+    let mut form = Form::new(&format!("Change values - {shown}"));
+    form.spacing(0);
+    let note = |t: &str| turbo_vision::views::static_text::StaticText::new(size(0, 1), t);
+    form.row(note("These are numbers. Write a formula, where"));
+    form.row(note("\"value\" is the number in the file. Examples:"));
+    form.row(note("  value * -1      change the sign"));
+    form.row(note("  value / 100     cents to euros"));
+    form.row(note("  value + 21      add 21"));
+    form.gap(1);
+    let expr = form.field("~F~ormula", InputLine::new(size(FORMULA_WIDTH, 1), 120));
+    form.row(note("(leave it blank to keep the numbers as they are)"));
+    form.ok_cancel();
+    let mut dialog = form.build();
+    dialog.prepare_modal(app);
+    if let Some(i) = dialog.get_mut(expr) {
+        i.set_text(current.expr.clone());
+    }
+    loop {
+        if app.execute_modal(&mut dialog, |_, _| ModalTick::Continue) != CM_OK {
+            return None;
+        }
+        let text = dialog
+            .get(expr)
+            .map(|i| i.text().trim().to_string())
+            .unwrap_or_default();
+        let checked = if text.is_empty() {
+            Ok(())
+        } else {
+            Transform::Expr(text.clone()).check()
+        };
+        match checked {
+            Ok(()) => {
+                return Some(Formula {
+                    expr: text,
+                    rest: current.rest.clone(),
+                });
+            }
+            Err(why) => {
+                turbo_vision::views::msgbox::message_box_ok(
+                    app,
+                    &format!("That formula does not work: {why}"),
+                );
+                dialog.end_modal(0);
+            }
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -401,13 +517,24 @@ mod tests {
     }
 
     #[test]
-    fn only_text_columns_can_be_changed() {
-        let data = b"name;qty\nana;5\nluis;7\n";
+    fn a_column_is_text_number_or_neither() {
+        let data = b"name;qty;when\nana;5;2026-01-02\nluis;n/a;2026-01-03\n";
         let mut o = detect_options(data, &ImportOptions::default());
         o.first_row_titles = true;
         let i = import(data, &o);
-        assert!(is_text_column(&i, 0));
-        assert!(!is_text_column(&i, 1));
+        assert_eq!(column_kind(&i, 0), Kind::Text);
+        assert_eq!(column_kind(&i, 1), Kind::Number);
+        assert_eq!(column_kind(&i, 2), Kind::Other);
+    }
+
+    #[test]
+    fn a_formula_round_trips_and_keeps_the_other_transforms() {
+        let f = Formula {
+            expr: "value * -1".into(),
+            rest: vec![Transform::Upper],
+        };
+        assert_eq!(Formula::from_transforms(&f.to_transforms()), f);
+        assert!(Formula::default().to_transforms().is_empty());
     }
 
     #[test]
